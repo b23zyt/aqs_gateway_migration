@@ -15,6 +15,9 @@
 # Vim
 .*.swp
 
+# Build Directory
+build_nrf9160_pca10090ns/*
+
 # FROM GITIGNORE FOR C DEVELOPMENT
 
 # Prerequisites
