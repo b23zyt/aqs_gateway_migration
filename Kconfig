@@ -1,0 +1,48 @@
+#
+# Copyright (c) 2018 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "MQTT simple sample"
+config MQTT_PUB_TOPIC
+	string "MQTT publish topic"
+	default "devices/demo_device/messages/events/"
+
+config MQTT_SUB_TOPIC
+	string "MQTT subscribe topic"
+	default "devices/demo_device/messages/devicebound/"
+
+config MQTT_CLIENT_ID
+	string "MQTT Client ID"
+	default "demo_device"
+
+config MQTT_BROKER_HOSTNAME
+	string "MQTT broker hostname"
+	default "Aquasensehub.azure-devices.net"
+
+config MQTT_BROKER_PORT
+	int "MQTT broker port"
+	default 8883
+
+config MQTT_MESSAGE_BUFFER_SIZE
+	int "MQTT message buffer size"
+	default 512
+
+config MQTT_PAYLOAD_BUFFER_SIZE
+	int "MQTT payload buffer size"
+	default 512
+
+config SEC_TAG
+    int "Security tag to use for the connection"
+    default 100
+
+config PEER_VERIFY
+    int "Peer verify parameter for mqtt_client"
+    default 1
+
+endmenu
+
+menu "Zephyr Kernel"
+source "$ZEPHYR_BASE/Kconfig.zephyr"
+endmenu
