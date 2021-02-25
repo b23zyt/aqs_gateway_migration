@@ -51,12 +51,12 @@ static struct pollfd fds;
 #if defined(CONFIG_BSD_LIBRARY)
 
 /* UART variables */
-#define UART_BUF_SIZE           128
+#define UART_BUF_SIZE   256
 static struct device  *dev_uart;
 static K_FIFO_DEFINE(fifo_uart_tx_data);
 static K_FIFO_DEFINE(fifo_uart_rx_data);
 static u8_t uart_rxbuf[UART_BUF_SIZE];
-static u8_t uart_rx_leng = 0;
+static u16_t uart_rx_leng = 0;
 struct uart_data_t {
 	void  *fifo_reserved;
 	u8_t    data[UART_BUF_SIZE];
@@ -69,6 +69,12 @@ volatile bool unsent_data = false;
 volatile uint16_t nRun = 0;
 uint32_t numPublished = 0;
 static void sendCloudMsg(void);
+
+typedef enum {
+     UART_STRING_OK,                    // Complete transmission, string looks normal
+     UART_STRING_INCOMPLETE,            // Transmission is likely not yet complete
+     UART_STRING_THROWAWAY_COMPLETE,     // Transmission is complete, but string has some unwanted chars
+} uart_str_check_t;
 
 // since printk not showing
 #define DEBUG_PRINT_BUF_SIZE 500
@@ -539,11 +545,77 @@ static void certificate_init(void) // todo - probably shouldn't rewrite the cred
 
   }
 
+// check if the string received over UART is a complete packet or garbage data
+static uart_str_check_t check_uart_str()
+{
+    // Expected format is: "/r/n{ ........ }/r/n"
+
+    // Start by checking ending of string
+    // If not properly terminated then assume more data is still coming
+    if( (uart_rxbuf[uart_rx_leng-3] != 0x7d) || // 0x7d == }
+        (uart_rxbuf[uart_rx_leng-2] != 0x0d) || // 0x0d == /r
+        (uart_rxbuf[uart_rx_leng-1] != 0x0a) )  // 0x0a == /n
+    {
+        return UART_STRING_INCOMPLETE;
+    }
+
+    // Check the opening of the string
+    // If it does not start properly then there was some error in transmission
+    if( (uart_rxbuf[0] != 0x0d) || // 0x0d == /r
+        (uart_rxbuf[1] != 0x0a) || // 0x0a == /n
+        (uart_rxbuf[2] != 0x7b) )  // 0x7b == {
+    {
+        return UART_STRING_THROWAWAY_COMPLETE;
+    }
+    
+    // Check the string only contains 2 LF, 2 CR, 1 {, 1 }
+    uint8_t num_LF = 0; // \n, 0x0a
+    uint8_t num_CR = 0; // \r, 0x0d
+    uint8_t num_ob = 0; // {,  0x7b
+    uint8_t num_cb = 0; // },  0x7d
+    
+    // count each character by iterating over buffer
+    for( uint8_t i = 0; i < uart_rx_leng; i++)
+    {
+        switch( uart_rxbuf[i] )
+        {
+            case 0x0a:
+                num_LF++;
+                break;
+
+            case 0x0d:
+                num_CR++;
+                break;
+
+            case 0x7b:
+                num_ob++;
+                break;
+
+            case 0x7d:
+                num_cb++;
+                break;
+        }
+    }
+
+    if( num_LF != 2 ||
+        num_CR != 2 ||
+        num_ob != 1 ||
+        num_cb != 1 )
+    {
+        return UART_STRING_THROWAWAY_COMPLETE;
+    }
+    else
+    {
+        return UART_STRING_OK;
+    }
+
+}
+
 
 static void uart_cb(struct device *uart)
 {
     uint8_t temp_rx[UART_BUF_SIZE];
-    int data_length=0;
+    uint16_t data_length=0;
     uart_irq_update(uart);
 
     if (uart_irq_rx_ready(uart)) // get new characters from FIFO
@@ -563,20 +635,19 @@ static void uart_cb(struct device *uart)
         // discard and start over
         memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
         uart_rx_leng = 0; 
-
     }
     else if( uart_rx_leng > 35 ) // assume packets shorter than this are garbage or incomplete
     {
-        if( uart_rxbuf[uart_rx_leng-1] == 0x0a &&
-            uart_rxbuf[uart_rx_leng-2] == 0x0d ) // message terminated with CR and LF
+        uint8_t ret_val = check_uart_str();
+        
+        switch( ret_val )
         {
-            if( uart_rxbuf[0]              == 0x7b &&
-                uart_rxbuf[uart_rx_leng-3] == 0x7d )  // "{" and "}" character are first and last
-            {
+        
+            case UART_STRING_OK: // a complete string with no issues
                 if (unsent_data == false)
                 {
                     memset(data_uart, '\0', sizeof(data_uart)); // clear the UART data string
-                    strncpy(data_uart, uart_rxbuf, uart_rx_leng - 2); // copy in the new UART data
+                    strncpy(data_uart, uart_rxbuf+2, uart_rx_leng - 4); // copy in the new UART data
                     unsent_data = true; // set flag for new data ready to be sent to cloud
 
                     #ifndef APP_USE_TIMERS_FOR_WORKQUEUE
@@ -586,12 +657,16 @@ static void uart_cb(struct device *uart)
                     memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
                     uart_rx_leng = 0; 
                 }
-            }
-            else // some other message format, discard
-            {
+                break;
+            
+            case UART_STRING_INCOMPLETE:
+                // do nothing, wait for string to terminate
+                break;
+
+            case UART_STRING_THROWAWAY_COMPLETE:
                 memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
                 uart_rx_leng = 0;
-            }
+                break;
         }
     }
 
@@ -675,12 +750,12 @@ static int init_uart(void)
 
 static void sendCloudMsg(void)
 {
-    int err_dp = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE, data_uart, strlen(data_uart));
-    if (err_dp == 0)
-    {
-        memset(debug_print, '\0', sizeof(debug_print));
-        sprintf(debug_print, "Published: %s", data_uart);
-    }
+//    int err_dp = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE, data_uart, strlen(data_uart));
+//    if (err_dp == 0)
+//    {
+//        memset(debug_print, '\0', sizeof(debug_print));
+//        sprintf(debug_print, "Published: %s", data_uart);
+//    }
 }
 
 
