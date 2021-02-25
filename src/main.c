@@ -664,43 +664,13 @@ static void uart_cb(struct device *uart)
                 break;
 
             case UART_STRING_THROWAWAY_COMPLETE:
+//                memset(debug_print, '\0', sizeof(debug_print));
+//                sprintf(debug_print, "%s", uart_rxbuf);
                 memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
                 uart_rx_leng = 0;
                 break;
         }
     }
-
-
-//    if (uart_rx_leng > 0)
-//    {
-//        if ( (uart_rx_leng == UART_BUF_SIZE) || 
-//             (uart_rxbuf[uart_rx_leng - 1] == 0x0a) || 
-//             (uart_rxbuf[uart_rx_leng - 1] == 0x0d) || 
-//             (uart_rxbuf[uart_rx_leng - 2] == 0x0d) )
-//        {              
-//            if (uart_rx_leng > 35 && uart_rx_leng < UART_BUF_SIZE)
-//            {
-//                //printk("C:%s\n",data_uart);
-//                if (unsent_data == false)
-//                {
-//                    uint8_t pos_modifier = 0;
-//                    if (uart_rxbuf[uart_rx_leng - 1] == 0x0a) pos_modifier++;
-//                    if (uart_rxbuf[uart_rx_leng - 1] == 0x0d) pos_modifier++;
-//                    if (uart_rxbuf[uart_rx_leng - 2] == 0x0d) pos_modifier++;
-//                    memset(data_uart, '\0', sizeof(data_uart));
-//                    strncpy(data_uart, uart_rxbuf, uart_rx_leng - pos_modifier);
-//                    unsent_data = true;
-//
-//                    #ifndef APP_USE_TIMERS_FOR_WORKQUEUE
-//                        k_work_submit_to_queue(&queue_work_msg_send, &work_msg_send);
-//                    #endif
-//                }
-//            }
-//            uart_rxbuf[0] = 0;
-//            memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
-//            uart_rx_leng = 0;     
-//        }
-//    }
 
     if (uart_irq_tx_ready(uart))
     {
@@ -750,12 +720,12 @@ static int init_uart(void)
 
 static void sendCloudMsg(void)
 {
-//    int err_dp = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE, data_uart, strlen(data_uart));
-//    if (err_dp == 0)
-//    {
-//        memset(debug_print, '\0', sizeof(debug_print));
-//        sprintf(debug_print, "Published: %s", data_uart);
-//    }
+    int err_dp = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE, data_uart, strlen(data_uart));
+    if (err_dp == 0)
+    {
+        memset(debug_print, '\0', sizeof(debug_print));
+        sprintf(debug_print, "Published: %s", data_uart);
+    }
 }
 
 
