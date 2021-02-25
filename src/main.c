@@ -64,7 +64,7 @@ struct uart_data_t {
 };
 uint8_t data_uart[UART_BUF_SIZE];
 uint8_t data_uart_temp[UART_BUF_SIZE];
-volatile bool vChanged = false;
+volatile bool unsent_data = false;
 
 volatile uint16_t nRun = 0;
 uint32_t numPublished = 0;
@@ -75,15 +75,20 @@ static void sendCloudMsg(void);
 uint8_t debug_print[DEBUG_PRINT_BUF_SIZE];
 
 // Timer stuff
-#define TIMER_INTERVAL_MSEC 500
-struct k_timer timer_msg_send;
+//#define APP_USE_TIMERS_FOR_WORKQUEUE // alternate option is to submit to workqueue directly in uart_cb
+#ifdef APP_USE_TIMERS_FOR_WORKQUEUE
+    #define TIMER_INTERVAL_MSEC 500
+    struct k_timer timer_msg_send;
+#endif
 
 // Workqueue stuff
 #define MY_STACK_SIZE 512
 #define MY_PRIORITY 5
 K_THREAD_STACK_DEFINE(my_stack_area, MY_STACK_SIZE);
-// struct k_work_q queue_work_msg_send;
-void work_handler_msg_send(struct k_work *work);
+
+struct k_work_q  queue_work_msg_send; // Work queue structure
+struct k_work    work_msg_send;       // Work item structure
+void work_handler_msg_send(struct k_work * work);
 K_WORK_DEFINE(my_work, work_handler_msg_send);
 void timer_handler_msg_send(struct k_timer *timer_id);
 
@@ -541,42 +546,86 @@ static void uart_cb(struct device *uart)
     int data_length=0;
     uart_irq_update(uart);
 
-    if (uart_irq_rx_ready(uart))
+    if (uart_irq_rx_ready(uart)) // get new characters from FIFO
     {
         data_length = uart_fifo_read(uart, temp_rx, sizeof(temp_rx));
         temp_rx[data_length] = 0;
     }
 
-    for(int i=0;i<data_length ;i++)
+    for(int i=0; i<data_length; i++) // copy from temp into rxbuf
     {
         uart_rxbuf[uart_rx_leng] = temp_rx[i];
         uart_rx_leng++;
     }
 
-    if (uart_rx_leng > 0)
+    if( uart_rx_leng == UART_BUF_SIZE ) // Buffer filled up, something went wrong
     {
-        if ( (uart_rx_leng == UART_BUF_SIZE) || 
-             (uart_rxbuf[uart_rx_leng - 1] == 0x0a) || 
-             (uart_rxbuf[uart_rx_leng - 1] == 0x0d) || 
-             (uart_rxbuf[uart_rx_leng - 2] == 0x0d) )
-        {              
-            if (uart_rx_leng > 35 && uart_rx_leng < UART_BUF_SIZE)
+        // discard and start over
+        memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
+        uart_rx_leng = 0; 
+
+    }
+    else if( uart_rx_leng > 35 ) // assume packets shorter than this are garbage or incomplete
+    {
+        if( uart_rxbuf[uart_rx_leng-1] == 0x0a &&
+            uart_rxbuf[uart_rx_leng-2] == 0x0d ) // message terminated with CR and LF
+        {
+            if( uart_rxbuf[0]              == 0x7b &&
+                uart_rxbuf[uart_rx_leng-3] == 0x7d )  // "{" and "}" character are first and last
             {
-                //printk("C:%s\n",data_uart);
-                if (vChanged == false)
+                if (unsent_data == false)
                 {
-                    uint8_t pos_modifier = 0;
-                    if (uart_rxbuf[uart_rx_leng - 1] == 0x0a) pos_modifier++;
-                    if (uart_rxbuf[uart_rx_leng - 2] == 0x0d) pos_modifier++;
-                    memset(data_uart, '\0', sizeof(data_uart));
-                    strncpy(data_uart, uart_rxbuf, uart_rx_leng-pos_modifier);
-                    vChanged = true;
+                    memset(data_uart, '\0', sizeof(data_uart)); // clear the UART data string
+                    strncpy(data_uart, uart_rxbuf, uart_rx_leng - 2); // copy in the new UART data
+                    unsent_data = true; // set flag for new data ready to be sent to cloud
+
+                    #ifndef APP_USE_TIMERS_FOR_WORKQUEUE
+                        k_work_submit_to_queue(&queue_work_msg_send, &work_msg_send); // submit to work queue
+                    #endif
+
+                    memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
+                    uart_rx_leng = 0; 
                 }
             }
-            uart_rxbuf[0] = 0;
-            uart_rx_leng = 0;     
+            else // some other message format, discard
+            {
+                memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
+                uart_rx_leng = 0;
+            }
         }
     }
+
+
+//    if (uart_rx_leng > 0)
+//    {
+//        if ( (uart_rx_leng == UART_BUF_SIZE) || 
+//             (uart_rxbuf[uart_rx_leng - 1] == 0x0a) || 
+//             (uart_rxbuf[uart_rx_leng - 1] == 0x0d) || 
+//             (uart_rxbuf[uart_rx_leng - 2] == 0x0d) )
+//        {              
+//            if (uart_rx_leng > 35 && uart_rx_leng < UART_BUF_SIZE)
+//            {
+//                //printk("C:%s\n",data_uart);
+//                if (unsent_data == false)
+//                {
+//                    uint8_t pos_modifier = 0;
+//                    if (uart_rxbuf[uart_rx_leng - 1] == 0x0a) pos_modifier++;
+//                    if (uart_rxbuf[uart_rx_leng - 1] == 0x0d) pos_modifier++;
+//                    if (uart_rxbuf[uart_rx_leng - 2] == 0x0d) pos_modifier++;
+//                    memset(data_uart, '\0', sizeof(data_uart));
+//                    strncpy(data_uart, uart_rxbuf, uart_rx_leng - pos_modifier);
+//                    unsent_data = true;
+//
+//                    #ifndef APP_USE_TIMERS_FOR_WORKQUEUE
+//                        k_work_submit_to_queue(&queue_work_msg_send, &work_msg_send);
+//                    #endif
+//                }
+//            }
+//            uart_rxbuf[0] = 0;
+//            memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
+//            uart_rx_leng = 0;     
+//        }
+//    }
 
     if (uart_irq_tx_ready(uart))
     {
@@ -610,7 +659,6 @@ static void uart_cb(struct device *uart)
 }
 
 
-
 static int init_uart(void)
 {
     dev_uart = device_get_binding("UART_0");
@@ -639,20 +687,25 @@ static void sendCloudMsg(void)
 void work_handler_msg_send(struct k_work *work)
 {
     sendCloudMsg();
+    unsent_data = false;
 }
 
-//void timer_handler_msg_send(struct k_timer *timer_id)
-//{
-////  printk("timer____\r\n");
-//  if (nRun == 0) {
-//    if (vChanged == true) {
-//      printk("___ALL TRUE \r\n");
-//      nRun=1;
-//      vChanged = false;
-//      k_work_submit(&queue_work_msg_send);
-//    }
-//  }
-//}
+#ifdef APP_USE_TIMERS_FOR_WORKQUEUE
+void timer_handler_msg_send(struct k_timer *timer_id)
+{
+    //  printk("timer____\r\n");
+    if (nRun == 0)
+    {
+        if (unsent_data == true) 
+        {
+            printk("___ALL TRUE \r\n");
+            //      nRun=1;
+            unsent_data = false;
+            k_work_submit_to_queue(&queue_work_msg_send, &work_msg_send);
+        }
+    }
+}
+#endif
 
 
 void main(void)
@@ -720,17 +773,18 @@ void main(void)
             sys_reboot(0);
         #endif 
     }
+    
+    k_work_init(&work_msg_send, work_handler_msg_send);   // Initialize the work items that will be submitted
+    k_work_q_start( &queue_work_msg_send, my_stack_area,        
+                    K_THREAD_STACK_SIZEOF(my_stack_area), MY_PRIORITY); // Initialize & start the work queue that they are submitted to
 
-
-    //        k_work_init(&queue_work_msg_send, work_handler_msg_send);
-
-
-
-    //        k_timer_init(&timer_msg_send, timer_handler_msg_send, NULL);
-    //        k_timer_start(&timer_msg_send, K_MSEC(TIMER_INTERVAL_MSEC), K_MSEC(TIMER_INTERVAL_MSEC));
+    #ifdef APP_USE_TIMERS_FOR_WORKQUEUE
+        k_timer_init(&timer_msg_send, timer_handler_msg_send, NULL);
+        k_timer_start(&timer_msg_send, K_MSEC(TIMER_INTERVAL_MSEC), K_MSEC(TIMER_INTERVAL_MSEC));
+    #endif
 
     int i=0;
-    strncpy ( data_uart_temp, "Temp", sizeof("Temp"));
+//    strncpy ( data_uart_temp, "Temp", sizeof("Temp"));
     while (1)
     {
 
@@ -795,15 +849,15 @@ void main(void)
         }
         }*/
 
-        if( strcmp(data_uart,"")) // UART not empty
-        {
-            if( strcmp(data_uart,data_uart_temp)) // UART has new data (not same as prev)
-            {
-                memset(data_uart_temp, '\0', sizeof(data_uart_temp));
-                strncpy ( data_uart_temp, data_uart, sizeof(data_uart));
+//        if( strcmp(data_uart,"")) // UART not empty
+//        {
+//            if( strcmp(data_uart,data_uart_temp)) // UART has new data (not same as prev)
+//            {
+//                memset(data_uart_temp, '\0', sizeof(data_uart_temp));
+//                strncpy ( data_uart_temp, data_uart, sizeof(data_uart));
 //                sendCloudMsg();
-            }
-        }
+//            }
+//        }
           
     }
 
