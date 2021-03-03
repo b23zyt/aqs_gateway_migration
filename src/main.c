@@ -24,8 +24,20 @@
 #include <modem_key_mgmt.h>
 #include <at_cmd.h> // todo: probably don't need this
 
-static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Faquadevice&sig=MjnaRLJFb5UxsQu8PCQtrP8UUIyQbncREHFL%2BvlkCHw%3D&se=1614554527";
-static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/aquadevice/?api-version=2018-06-30";
+//AquaDevice Settings
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Faquadevice&sig=MjnaRLJFb5UxsQu8PCQtrP8UUIyQbncREHFL%2BvlkCHw%3D&se=1614554527";
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Faquadevice&sig=H%2Bk%2FfgbgVZ%2FghvygeqBA2a4Ym3TvO7X8GPPNyMhDhOA%3D&se=1614646631";
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Faquadevice&sig=qit%2FCl9lYVmZe%2B3zQarg8LJlhpQya9f9CNNIxFI2z1I%3D&se=1646242927";
+//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/aquadevice/?api-version=2018-06-30";
+
+//LeakDevice Settings
+static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
+static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
+
+//DemoDevice Settings
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
+//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
+
 
 #if defined(CONFIG_MQTT_LIB_TLS)
 static sec_tag_t sec_tag_list[] = { CONFIG_SEC_TAG };
