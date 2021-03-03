@@ -555,7 +555,7 @@ static void certificate_init(void) // todo - probably shouldn't rewrite the cred
         printk("ERROR: key write %d\n", err);
     }
 
-  }
+}
 
 // check if the string received over UART is a complete packet or garbage data
 static uart_str_check_t check_uart_str()
@@ -895,27 +895,6 @@ void main(void)
             break;
         }
 
-        /*
-        if(strlen(data_uart)>2)
-
-        if (nRun == 0) {
-        if (vChanged == true) {
-        nRun=1;
-        vChanged = false;
-        sendCloudMsg();
-        }
-        }*/
-
-//        if( strcmp(data_uart,"")) // UART not empty
-//        {
-//            if( strcmp(data_uart,data_uart_temp)) // UART has new data (not same as prev)
-//            {
-//                memset(data_uart_temp, '\0', sizeof(data_uart_temp));
-//                strncpy ( data_uart_temp, data_uart, sizeof(data_uart));
-//                sendCloudMsg();
-//            }
-//        }
-          
     }
 
     printk("Disconnecting MQTT client...\n");
