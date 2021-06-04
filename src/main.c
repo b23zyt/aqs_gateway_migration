@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <drivers/uart.h>
 #include <string.h>
+#include <drivers/gpio.h>
 
 #include <net/mqtt.h>
 #include <net/socket.h>
@@ -31,12 +32,12 @@
 //static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/aquadevice/?api-version=2018-06-30";
 
 //LeakDevice Settings
-static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
-static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
+//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
 
 //DemoDevice Settings
-//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
-//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
+static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
+static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
 
 
 #if defined(CONFIG_MQTT_LIB_TLS)
@@ -59,6 +60,8 @@ static bool connected;
 
 /* File descriptor */
 static struct pollfd fds;
+
+struct device *dev;
 
 #if defined(CONFIG_BSD_LIBRARY)
 
@@ -274,6 +277,7 @@ void mqtt_evt_handler(struct mqtt_client *const c,
 
         connected = true;
         //printk("[%s:%d] MQTT client connected!\n", __func__, __LINE__);
+
         subscribe();
         break;
 
@@ -501,10 +505,16 @@ static void modem_configure(void)
 #else /* defined(CONFIG_LWM2M_CARRIER) */
         int err;
 
-        //printk("LTE Link Connecting ...\n");
+        printk("LTE Link Connecting ...\n");
         err = lte_lc_init_and_connect();
         __ASSERT(err == 0, "LTE link could not be established.");
-        //printk("LTE Link Connected!\n");
+        printk("LTE Link Connected!\n");
+
+        //Turn off LED BLUE P0.02
+        gpio_pin_write(dev, 2, 1);
+        //Turn on LED BLUE P0.03
+        gpio_pin_write(dev, 3, 0);
+
 #endif /* defined(CONFIG_LWM2M_CARRIER) */
     }
 #endif /* defined(CONFIG_LTE_LINK_CONTROL) */
@@ -771,6 +781,21 @@ void main(void)
     k_sleep(K_SECONDS(6));
 
     printk("The MQTT simple sample started\n");
+
+    //Configure GPIOs
+	
+    dev = device_get_binding("GPIO_0");
+
+    gpio_pin_configure(dev, 2, GPIO_DIR_OUT); //p0.02 == LED RED
+    gpio_pin_configure(dev, 3, GPIO_DIR_OUT); //p0.03 == LED BLUE
+    
+    //LEDs Initially off
+    gpio_pin_write(dev, 2, 1);
+    gpio_pin_write(dev, 3, 1);
+
+
+    //Turn on LED RED P0.02
+    gpio_pin_write(dev, 2, 0); 
 
     uint8_t mqtt_conn_attempts = 0;
     uint8_t mqtt_conn_max_tries = 10;
