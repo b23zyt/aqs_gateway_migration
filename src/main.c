@@ -32,13 +32,25 @@
 //static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/aquadevice/?api-version=2018-06-30";
 
 //LeakDevice Settings
-static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
-static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
+//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
 
 //DemoDevice Settings
 //static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=P3pJ6%2BczZW5bqT9lADmFpJYxWCioQL9RiduEIBJbgGk%3D&se=1623369224";
 //static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
 
+//RiaDevice Settings
+static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Friadevice&sig=jaOE5psBTumK6nsPP8n%2FFeGQ%2FnnJhK94O1evh2c53Fc%3D&se=1623445490";
+static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/riadevice/?api-version=2018-06-30";
+
+// Fanstel Gateway Version
+//#define BLG840_M1 // otherwise M2
+
+#ifdef BLG840_M1
+    #define RED_LED_PIN    2
+    #define BLUE_LED_PIN   3
+#endif
 
 #if defined(CONFIG_MQTT_LIB_TLS)
 static sec_tag_t sec_tag_list[] = { CONFIG_SEC_TAG };
@@ -276,7 +288,7 @@ void mqtt_evt_handler(struct mqtt_client *const c,
         }
 
         connected = true;
-        //printk("[%s:%d] MQTT client connected!\n", __func__, __LINE__);
+        printk("[%s:%d] MQTT client connected!\n", __func__, __LINE__);
 
         subscribe();
         break;
@@ -291,8 +303,8 @@ void mqtt_evt_handler(struct mqtt_client *const c,
     case MQTT_EVT_PUBLISH: {
         const struct mqtt_publish_param *p = &evt->param.publish;
 
-//        printk("[%s:%d] MQTT PUBLISH result=%d len=%d\n", __func__,
-//               __LINE__, evt->result, p->message.payload.len);
+        printk("[%s:%d] MQTT PUBLISH result=%d len=%d\n", __func__,
+               __LINE__, evt->result, p->message.payload.len);
         err = publish_get_payload(c, p->message.payload.len);
         if (err >= 0)
         {
@@ -510,10 +522,12 @@ static void modem_configure(void)
         __ASSERT(err == 0, "LTE link could not be established.");
         printk("LTE Link Connected!\n");
 
+#ifdef BLG840_M1
         //Turn off LED BLUE P0.02
-        gpio_pin_write(dev, 2, 1);
+        gpio_pin_write(dev, RED_LED_PIN, 1);
         //Turn on LED BLUE P0.03
-        gpio_pin_write(dev, 3, 0);
+        gpio_pin_write(dev, BLUE_LED_PIN, 0);
+#endif
 
 #endif /* defined(CONFIG_LWM2M_CARRIER) */
     }
@@ -782,20 +796,21 @@ void main(void)
 
     printk("The MQTT simple sample started\n");
 
+#ifdef BLG840_M1
     //Configure GPIOs
 	
     dev = device_get_binding("GPIO_0");
 
-    gpio_pin_configure(dev, 2, GPIO_DIR_OUT); //p0.02 == LED RED
-    gpio_pin_configure(dev, 3, GPIO_DIR_OUT); //p0.03 == LED BLUE
+    gpio_pin_configure(dev, RED_LED_PIN, GPIO_DIR_OUT); //p0.02 == LED RED
+    gpio_pin_configure(dev,BLUE_LED_PIN, GPIO_DIR_OUT); //p0.03 == LED BLUE
     
     //LEDs Initially off
-    gpio_pin_write(dev, 2, 1);
-    gpio_pin_write(dev, 3, 1);
-
+    gpio_pin_write(dev, RED_LED_PIN, 1);
+    gpio_pin_write(dev,BLUE_LED_PIN, 1);
 
     //Turn on LED RED P0.02
-    gpio_pin_write(dev, 2, 0); 
+    gpio_pin_write(dev, RED_LED_PIN, 0); 
+#endif
 
     uint8_t mqtt_conn_attempts = 0;
     uint8_t mqtt_conn_max_tries = 10;
