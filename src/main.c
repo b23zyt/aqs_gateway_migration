@@ -32,12 +32,12 @@
 //static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/aquadevice/?api-version=2018-06-30";
 
 //LeakDevice Settings
-//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
-//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
+static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
+static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
 
 //DemoDevice Settings
-static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
-static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
+//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
 
 
 #if defined(CONFIG_MQTT_LIB_TLS)
@@ -658,7 +658,7 @@ static void uart_cb(struct device *uart)
         memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
         uart_rx_leng = 0; 
     }
-    else if( uart_rx_leng > 35 ) // assume packets shorter than this are garbage or incomplete
+    else if( uart_rx_leng > 100 ) // assume packets shorter than this are garbage or incomplete
     {
         uint8_t ret_val = check_uart_str();
         
