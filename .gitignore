@@ -3,6 +3,9 @@
 *.emSession
 *.jlink
 
+# Visual Studio
+.vscode/*
+
 # Shortcuts
 *.lnk
 
@@ -16,7 +19,7 @@
 .*.swp
 
 # Build Directory
-build_nrf9160_pca10090ns/*
+build*/*
 
 # FROM GITIGNORE FOR C DEVELOPMENT
 
