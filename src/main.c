@@ -30,9 +30,25 @@
 
 #include "certificates.h"
 
+//AquaDevice Settings
+//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Faquadevice&sig=qit%2FCl9lYVmZe%2B3zQarg8LJlhpQya9f9CNNIxFI2z1I%3D&se=1646242927";
+//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/aquadevice/?api-version=2018-06-30";
+
 //LeakDevice Settings
-static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
-static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
+// static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
+// static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
+
+//DemoDevice Settings
+static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
+static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
+
+//RiaDevice Settings
+// static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Friadevice&sig=jaOE5psBTumK6nsPP8n%2FFeGQ%2FnnJhK94O1evh2c53Fc%3D&se=1623445490";
+// static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/riadevice/?api-version=2018-06-30";
+
+// 54Smallwood1 Settings
+// static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2F54Smallwood1&sig=upogWPrTMLpleotgqjqrmotxWm2EW04Dfvmvnomx9Ek%3D&se=1674660115";
+// static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/54Smallwood1/?api-version=2018-06-30";
 
 // Fanstel Gateway Version
 //#define BLG840_M1 // otherwise M2
@@ -98,15 +114,19 @@ uint8_t debug_print[DEBUG_PRINT_BUF_SIZE];
 #endif
 
 // Workqueue stuff
-#define MY_STACK_SIZE 512
+#define MY_STACK_SIZE 2048
 #define MY_PRIORITY 5
 K_THREAD_STACK_DEFINE(my_stack_area, MY_STACK_SIZE);
 
-struct k_work_q  queue_work_msg_send; // Work queue structure
-struct k_work    work_msg_send;       // Work item structure
-void work_handler_msg_send(struct k_work * work);
-K_WORK_DEFINE(my_work, work_handler_msg_send);
+struct k_work_q  	queue_work_msg_send; // Work queue structure
+
+struct k_work    	work_msg_send;       			// Work item structure
+void work_handler_msg_send(struct k_work * work);	// Work item handler
+K_WORK_DEFINE(my_work, work_handler_msg_send);		// Define work item
+
+#ifdef APP_USE_TIMERS_FOR_WORKQUEUE
 void timer_handler_msg_send(struct k_timer *timer_id);
+#endif
 
 
 #if defined(CONFIG_MQTT_LIB_TLS)
@@ -114,7 +134,7 @@ static int certificates_provision(void)
 {
 	int err = 0;
 
-	LOG_INF("Provisioning certificates%s","");
+	LOG_INF("Provisioning certificates");
 
 #if defined(CONFIG_NRF_MODEM_LIB) && defined(CONFIG_MODEM_KEY_MGMT)
 
@@ -291,7 +311,7 @@ void mqtt_evt_handler(struct mqtt_client *const c,
 			break;
 		}
 
-		LOG_INF("MQTT client connected%s","");
+		LOG_INF("MQTT client connected");
 		subscribe();
 		break;
 
@@ -323,7 +343,7 @@ void mqtt_evt_handler(struct mqtt_client *const c,
 				payload_buf, p->message.payload.len);
 		} else {
 			LOG_ERR("publish_get_payload failed: %d", err);
-			LOG_INF("Disconnecting MQTT client...%s","");
+			LOG_INF("Disconnecting MQTT client...");
 
 			err = mqtt_disconnect(c);
 			if (err) {
@@ -513,7 +533,7 @@ static int client_init(struct mqtt_client *client)
 	struct mqtt_sec_config *tls_cfg = &(client->transport).tls.config;
 	static sec_tag_t sec_tag_list[] = { CONFIG_MQTT_TLS_SEC_TAG };
 
-	LOG_INF("TLS enabled%s","");
+	LOG_INF("TLS enabled");
 	client->transport.type = MQTT_TRANSPORT_SECURE;
 
 	tls_cfg->peer_verify = CONFIG_MQTT_TLS_PEER_VERIFY;
@@ -588,7 +608,7 @@ static int modem_configure(void)
 	 * networks rejects timer updates after the device has registered to the
 	 * LTE network.
 	 */
-	LOG_INF("Disabling PSM and eDRX%s","");
+	LOG_INF("Disabling PSM and eDRX");
 	lte_lc_psm_req(false);
 	lte_lc_edrx_req(false);
 
@@ -607,13 +627,19 @@ static int modem_configure(void)
 #else /* defined(CONFIG_LWM2M_CARRIER) */
 		int err;
 
-		LOG_INF("LTE Link Connecting...%s","");
+		LOG_INF("LTE Link Connecting...");
 		err = lte_lc_init_and_connect();
-		if (err) {
+		if (err == -EALREADY) {
+			LOG_INF("LTE already initialized... now connecting...");
+			err = lte_lc_connect();
+		}
+		
+		if(err)
+		{
 			LOG_INF("Failed to establish LTE connection: %d", err);
 			return err;
 		}
-		LOG_INF("LTE Link Connected!%s","");
+		LOG_INF("LTE Link Connected!");
 
 #ifdef BLG840_M1
         //Turn off LED BLUE P0.02
@@ -806,10 +832,10 @@ static int init_uart(void)
 static void sendCloudMsg(void)
 {
     int err_dp = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE, data_uart, strlen(data_uart));
-    if (err_dp == 0)
+	
+    if (err_dp )
     {
-        memset(debug_print, '\0', sizeof(debug_print));
-        sprintf(debug_print, "Published: %s", data_uart);
+        LOG_INF("Publish error: %d", err_dp);
     }
 }
 
@@ -839,12 +865,26 @@ void timer_handler_msg_send(struct k_timer *timer_id)
 
 void main(void)
 {
-	int err;
+	int err, err_dp;
 	uint32_t connect_attempt = 0;
 
-	LOG_INF("The MQTT simple sample started%s","");
+	LOG_INF("The MQTT simple sample started");
 
-	k_sleep(K_SECONDS(6));
+	err = init_uart();
+    if (!err)
+    {
+        //printk("UART enabled\n");
+    }
+    else
+    {
+        printk("UART enable error\n");
+        #if !defined(CONFIG_DEBUG) && defined(CONFIG_REBOOT)
+            sys_reboot(0);
+        #endif 
+    }
+
+	
+	k_sleep(K_SECONDS(5));
 
 #ifdef BLG840_M1
     //Configure GPIOs
@@ -871,6 +911,9 @@ void main(void)
 #endif /* defined(CONFIG_MQTT_LIB_TLS) */
 
 	do {
+		// For nRF52840
+		LOG_INF("STATE_LTE_CONNECTING");
+	
 		err = modem_configure();
 		if (err) {
 			LOG_INF("Retrying in %d seconds",
@@ -879,6 +922,8 @@ void main(void)
 		}
 	} while (err);
 
+	// For nRF52840
+	LOG_INF("STATE_MQTT_CONNECTING");
 	err = client_init(&client);
 	if (err != 0) {
 		LOG_ERR("client_init: %d", err);
@@ -906,19 +951,6 @@ do_connect:
 		LOG_ERR("fds_init: %d", err);
 		return;
 	}
-
-	err = init_uart();
-    if (!err)
-    {
-        //printk("UART enabled\n");
-    }
-    else
-    {
-        printk("UART enable error\n");
-        #if !defined(CONFIG_DEBUG) && defined(CONFIG_REBOOT)
-            sys_reboot(0);
-        #endif 
-    }
     
     k_work_init(&work_msg_send, work_handler_msg_send);   // Initialize the work items that will be submitted
     k_work_queue_start( &queue_work_msg_send, my_stack_area,        
