@@ -51,13 +51,56 @@ static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demo
 // static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/54Smallwood1/?api-version=2018-06-30";
 
 // Fanstel Gateway Version
-//#define BLG840_M1 // otherwise M2
+#define BLG840_M2 // new gateway
+#ifndef BLG840_M2
+	#define BLG840_M1 // old gateway
+#endif
 
 #ifdef BLG840_M1
-    #define RED_LED_PIN    2
-    #define BLUE_LED_PIN   3
 	/* GPIO for LED */
-	static struct device *dev;
+	static struct device *led_dev;
+
+	/* The devicetree node identifier for the "led0" alias. */
+	#define RED_LED_NODE	DT_ALIAS(led0)
+
+	#if DT_NODE_HAS_STATUS(RED_LED_NODE, okay)
+	#define RED_LED			DT_GPIO_LABEL(RED_LED_NODE, gpios)
+	#define RED_LED_PIN		DT_GPIO_PIN(RED_LED_NODE, gpios)
+	#define RED_LED_FLAGS	DT_GPIO_FLAGS(RED_LED_NODE, gpios)
+	#else
+	/* A build error here means your board isn't set up to blink an LED. */
+	#error "Unsupported board: led0 devicetree alias is not defined"
+	#define RED_LED	""
+	#define RED_LED_PIN	0
+	#define RED_LED_FLAGS	0
+	#endif
+
+	/* The devicetree node identifier for the "led1" alias. */
+	#define BLU_LED_NODE DT_ALIAS(led1)
+
+	#if DT_NODE_HAS_STATUS(BLU_LED_NODE, okay)
+	#define BLU_LED			DT_GPIO_LABEL(BLU_LED_NODE, gpios)
+	#define BLU_LED_PIN		DT_GPIO_PIN(BLU_LED_NODE, gpios)
+	#define BLU_LED_FLAGS	DT_GPIO_FLAGS(BLU_LED_NODE, gpios)
+	#else
+	/* A build error here means your board isn't set up to blink an LED. */
+	#error "Unsupported board: led0 devicetree alias is not defined"
+	#define BLU_LED	""
+	#define BLU_LED_PIN	0
+	#define BLU_LED_FLAGS	0
+	#endif
+
+	/* Thread to Blink LED */
+	#define MY_TH_STACK_SIZE 500
+	#define MY_TH_PRIORITY 5
+
+	K_THREAD_STACK_DEFINE(my_th_stack_area, MY_TH_STACK_SIZE);
+	struct k_thread my_thread_data;
+
+	volatile bool lte_connecting = false;
+	volatile bool mqtt_connecting = false;
+	extern void blink_led_entry_point();
+
 #endif
 
 LOG_MODULE_REGISTER(mqtt_simple, CONFIG_MQTT_SIMPLE_LOG_LEVEL);
@@ -114,9 +157,9 @@ uint8_t debug_print[DEBUG_PRINT_BUF_SIZE];
 #endif
 
 // Workqueue stuff
-#define MY_STACK_SIZE 2048
-#define MY_PRIORITY 5
-K_THREAD_STACK_DEFINE(my_stack_area, MY_STACK_SIZE);
+#define MY_WQ_STACK_SIZE 2048
+#define MY_WQ_PRIORITY 5
+K_THREAD_STACK_DEFINE(my_wq_stack_area, MY_WQ_STACK_SIZE);
 
 struct k_work_q  	queue_work_msg_send; // Work queue structure
 
@@ -366,6 +409,10 @@ void mqtt_evt_handler(struct mqtt_client *const c,
 			LOG_ERR("MQTT SUBACK error: %d", evt->result);
 			break;
 		}
+
+#ifdef BLG840_M1
+		mqtt_connecting = false; // ends blinky thread
+#endif
 
 		LOG_INF("SUBACK packet id: %u", evt->param.suback.message_id);
 		break;
@@ -641,13 +688,6 @@ static int modem_configure(void)
 		}
 		LOG_INF("LTE Link Connected!");
 
-#ifdef BLG840_M1
-        //Turn off LED BLUE P0.02
-        gpio_pin_write(dev, RED_LED_PIN, 1);
-        //Turn on LED BLUE P0.03
-        gpio_pin_write(dev, BLUE_LED_PIN, 0);
-#endif
-
 #endif /* defined(CONFIG_LWM2M_CARRIER) */
 	}
 #endif /* defined(CONFIG_LTE_LINK_CONTROL) */
@@ -829,6 +869,32 @@ static int init_uart(void)
     return 0;
 }
 
+#ifdef BLG840_M1
+extern void blink_led_entry_point()
+{
+	bool led_state = false;
+
+	while( lte_connecting )
+	{
+		gpio_pin_set(led_dev, BLU_LED_PIN, (int)led_state);
+		led_state = !led_state;
+		k_sleep(K_SECONDS(1));
+	}
+
+	while( mqtt_connecting )
+	{
+		gpio_pin_set(led_dev, BLU_LED_PIN, (int)led_state);
+		led_state = !led_state;
+		k_sleep(K_SECONDS(0.5));
+	}
+
+	// leave in solid ON state
+	gpio_pin_set(led_dev, BLU_LED_PIN, 0);
+	return;
+}
+#endif
+
+
 static void sendCloudMsg(void)
 {
     int err_dp = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE, data_uart, strlen(data_uart));
@@ -870,6 +936,24 @@ void main(void)
 
 	LOG_INF("The MQTT simple sample started");
 
+#ifdef BLG840_M1
+
+	led_dev = device_get_binding(RED_LED);
+	if (led_dev == NULL) {
+		return;
+	}
+
+    err = gpio_pin_configure(led_dev, RED_LED_PIN, GPIO_OUTPUT_INACTIVE | RED_LED_FLAGS); //p0.02 == LED RED, logic reversed?
+	if (err < 0) {
+		return;
+	}
+    err = gpio_pin_configure(led_dev, BLU_LED_PIN, GPIO_OUTPUT_ACTIVE | BLU_LED_FLAGS); //p0.03 == LED BLUE, logic reversed?
+	if (err < 0) {
+		return;
+	}
+
+#endif
+
 	err = init_uart();
     if (!err)
     {
@@ -883,24 +967,8 @@ void main(void)
         #endif 
     }
 
-	
 	k_sleep(K_SECONDS(5));
 
-#ifdef BLG840_M1
-    //Configure GPIOs
-	
-    dev = device_get_binding("GPIO_0");
-
-    gpio_pin_configure(dev, RED_LED_PIN, GPIO_DIR_OUT); //p0.02 == LED RED
-    gpio_pin_configure(dev,BLUE_LED_PIN, GPIO_DIR_OUT); //p0.03 == LED BLUE
-    
-    //LEDs Initially off
-    gpio_pin_write(dev, RED_LED_PIN, 1);
-    gpio_pin_write(dev,BLUE_LED_PIN, 1);
-
-    //Turn on LED RED P0.02
-    gpio_pin_write(dev, RED_LED_PIN, 0); 
-#endif
 
 #if defined(CONFIG_MQTT_LIB_TLS)
 	err = certificates_provision();
@@ -909,6 +977,18 @@ void main(void)
 		return;
 	}
 #endif /* defined(CONFIG_MQTT_LIB_TLS) */
+
+#ifdef BLG840_M1
+	// to blink LED
+	lte_connecting = true;
+	k_tid_t my_tid = k_thread_create(&my_thread_data, my_th_stack_area,
+								K_THREAD_STACK_SIZEOF(my_th_stack_area),
+								blink_led_entry_point,
+								NULL, NULL, NULL,
+								MY_TH_PRIORITY, 0, K_NO_WAIT);
+	//Turn off RED LED
+	gpio_pin_set(led_dev, RED_LED_PIN, 1);
+#endif
 
 	do {
 		// For nRF52840
@@ -921,6 +1001,11 @@ void main(void)
 			k_sleep(K_SECONDS(CONFIG_LTE_CONNECT_RETRY_DELAY_S));
 		}
 	} while (err);
+
+#ifdef BLG840_M1
+	mqtt_connecting = true;
+	lte_connecting = false;
+#endif
 
 	// For nRF52840
 	LOG_INF("STATE_MQTT_CONNECTING");
@@ -953,8 +1038,8 @@ do_connect:
 	}
     
     k_work_init(&work_msg_send, work_handler_msg_send);   // Initialize the work items that will be submitted
-    k_work_queue_start( &queue_work_msg_send, my_stack_area,        
-                    K_THREAD_STACK_SIZEOF(my_stack_area), MY_PRIORITY, NULL); // Initialize & start the work queue that they are submitted to
+    k_work_queue_start( &queue_work_msg_send, my_wq_stack_area,        
+                    K_THREAD_STACK_SIZEOF(my_wq_stack_area), MY_WQ_PRIORITY, NULL); // Initialize & start the work queue that they are submitted to
 
     #ifdef APP_USE_TIMERS_FOR_WORKQUEUE
         k_timer_init(&timer_msg_send, timer_handler_msg_send, NULL);
