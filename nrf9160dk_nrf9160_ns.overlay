@@ -1,14 +1,4 @@
-/* Needed to get NRF_UARTE2 and NRF_PWMn defined. */
-//For BLG840,PCA10090,SE9160-210
-&uart1 {
-  current-speed = <115200>;
-  status = "ok";
-  tx-pin = <1>;
-  rx-pin = <0>;
-  rts-pin = <14>;
-  cts-pin = <15>;
-};
-
+//For BLG840F
 &uart0 {
   current-speed = <115200>;
   status = "ok";
@@ -17,29 +7,6 @@
   rts-pin = <27>;
   cts-pin = <26>;
   hw-flow-control;
-};
-//For BLE60E40F
-/*
-&uart0 {
-  current-speed = <115200>;
-  status = "ok";
-  tx-pin = <1>;
-  rx-pin = <0>;
-  rts-pin = <14>;
-  cts-pin = <15>;
-};
-
-&uart1 {
-  current-speed = <115200>;
-  status = "ok";
-  tx-pin = <29>;
-  rx-pin = <28>;
-  rts-pin = <27>;
-  cts-pin = <26>;
-};
-*/
-&uart2 {
-	status = "ok";
 };
 
 &pwm1 {
