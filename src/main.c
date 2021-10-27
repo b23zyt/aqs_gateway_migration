@@ -30,25 +30,9 @@
 
 #include "certificates.h"
 
-//AquaDevice Settings
-//static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Faquadevice&sig=qit%2FCl9lYVmZe%2B3zQarg8LJlhpQya9f9CNNIxFI2z1I%3D&se=1646242927";
-//static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/aquadevice/?api-version=2018-06-30";
-
-//LeakDevice Settings
-// static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fleakdevice&sig=OMIO4K%2BUnZ1k%2BT2MMMSLAoMqcbAg8lDzR8ZFdE8XY3A%3D&se=1646332608";
-// static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/leakdevice/?api-version=2018-06-30";
-
-//DemoDevice Settings
+//IotHub Device Connection Parameters
 static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
 static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
-
-//RiaDevice Settings
-// static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Friadevice&sig=jaOE5psBTumK6nsPP8n%2FFeGQ%2FnnJhK94O1evh2c53Fc%3D&se=1623445490";
-// static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/riadevice/?api-version=2018-06-30";
-
-// 54Smallwood1 Settings
-// static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2F54Smallwood1&sig=upogWPrTMLpleotgqjqrmotxWm2EW04Dfvmvnomx9Ek%3D&se=1674660115";
-// static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/54Smallwood1/?api-version=2018-06-30";
 
 // Fanstel Gateway Version
 #define BLG840_M2 // new gateway
@@ -708,7 +692,7 @@ static uart_str_check_t check_uart_first_str()
     }
 
     // Check the string contains Application started
-       if( strstr(uart_rxbuf, "Application started") != NULL )
+    if( strstr(uart_rxbuf, "Application started") != NULL )
     {
         return UART_STRING_OK;
     }
@@ -804,13 +788,13 @@ static void uart_cb(const struct device *uart, void *user_data)
         uart_rx_leng++;
     }
 
-    if( uart_rx_leng == UART_BUF_SIZE ) // Buffer filled up, something went wrong
+    if( uart_rx_leng >= UART_BUF_SIZE ) // Buffer filled up, something went wrong
     {
         // discard and start over
         memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
         uart_rx_leng = 0; 
     }
-    else if( nRF52840_started && (uart_rx_leng > 15) )
+    else if( !nRF52840_started && (uart_rx_leng > 15) )
 	{
 		uint8_t ret_val = check_uart_first_str();
 
