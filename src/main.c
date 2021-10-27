@@ -51,7 +51,10 @@ static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demo
 // static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/54Smallwood1/?api-version=2018-06-30";
 
 // Fanstel Gateway Version
-#define BLG840_M1 // otherwise M2
+#define BLG840_M2 // new gateway
+#ifndef BLG840_M2
+	#define BLG840_M1 // old gateway
+#endif
 
 #ifdef BLG840_M1
 	/* GPIO for LED */
@@ -866,7 +869,7 @@ static int init_uart(void)
     return 0;
 }
 
-
+#ifdef BLG840_M1
 extern void blink_led_entry_point()
 {
 	bool led_state = false;
@@ -886,9 +889,10 @@ extern void blink_led_entry_point()
 	}
 
 	// leave in solid ON state
-	gpio_pin_set(led_dev, BLU_LED_PIN, 1);
+	gpio_pin_set(led_dev, BLU_LED_PIN, 0);
 	return;
 }
+#endif
 
 
 static void sendCloudMsg(void)
@@ -939,11 +943,11 @@ void main(void)
 		return;
 	}
 
-    err = gpio_pin_configure(led_dev, RED_LED_PIN, GPIO_OUTPUT_ACTIVE | RED_LED_FLAGS); //p0.02 == LED RED
+    err = gpio_pin_configure(led_dev, RED_LED_PIN, GPIO_OUTPUT_INACTIVE | RED_LED_FLAGS); //p0.02 == LED RED, logic reversed?
 	if (err < 0) {
 		return;
 	}
-    err = gpio_pin_configure(led_dev, BLU_LED_PIN, GPIO_OUTPUT_INACTIVE | BLU_LED_FLAGS); //p0.03 == LED BLUE
+    err = gpio_pin_configure(led_dev, BLU_LED_PIN, GPIO_OUTPUT_ACTIVE | BLU_LED_FLAGS); //p0.03 == LED BLUE, logic reversed?
 	if (err < 0) {
 		return;
 	}
@@ -983,7 +987,7 @@ void main(void)
 								NULL, NULL, NULL,
 								MY_TH_PRIORITY, 0, K_NO_WAIT);
 	//Turn off RED LED
-	gpio_pin_set(led_dev, RED_LED_PIN, 0);
+	gpio_pin_set(led_dev, RED_LED_PIN, 1);
 #endif
 
 	do {
