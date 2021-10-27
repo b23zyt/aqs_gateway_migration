@@ -134,9 +134,8 @@ struct uart_data_t {
 uint8_t data_uart[UART_BUF_SIZE];
 uint8_t data_uart_temp[UART_BUF_SIZE];
 volatile bool unsent_data = false;
+volatile bool nRF52840_started = false;
 
-volatile uint16_t nRun = 0;
-uint32_t numPublished = 0;
 static void sendCloudMsg(void);
 
 typedef enum {
@@ -149,10 +148,11 @@ typedef enum {
 #define DEBUG_PRINT_BUF_SIZE 500
 uint8_t debug_print[DEBUG_PRINT_BUF_SIZE];
 
-// Timer stuff
+/* Timer stuff */
 //#define APP_USE_TIMERS_FOR_WORKQUEUE // alternate option is to submit to workqueue directly in uart_cb
 #ifdef APP_USE_TIMERS_FOR_WORKQUEUE
     #define TIMER_INTERVAL_MSEC 500
+	volatile uint16_t nRun = 0;
     struct k_timer timer_msg_send;
 #endif
 
@@ -695,6 +695,29 @@ static int modem_configure(void)
 	return 0;
 }
 
+// check if the string received over UART is "Application started"
+static uart_str_check_t check_uart_first_str()
+{
+    // Expected format is: "Application started/n"
+
+    // Start by checking ending of string
+    // If not properly terminated then assume more data is still coming
+    if( uart_rxbuf[uart_rx_leng-1] != 0x0a )  // 0x0a == /n
+    {
+        return UART_STRING_INCOMPLETE;
+    }
+
+    // Check the string contains Application started
+       if( strstr(uart_rxbuf, "Application started") != NULL )
+    {
+        return UART_STRING_OK;
+    }
+       else
+       {
+               return UART_STRING_INCOMPLETE; // TODO: This is not ideal
+       }
+
+}
 
 // check if the string received over UART is a complete packet or garbage data
 static uart_str_check_t check_uart_str()
@@ -787,7 +810,22 @@ static void uart_cb(const struct device *uart, void *user_data)
         memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
         uart_rx_leng = 0; 
     }
-    else if( uart_rx_leng > 100 ) // assume packets shorter than this are garbage or incomplete
+    else if( nRF52840_started && (uart_rx_leng > 15) )
+	{
+		uint8_t ret_val = check_uart_first_str();
+
+		switch( ret_val )
+		{
+				case UART_STRING_OK:
+						nRF52840_started = true;
+		memset(uart_rxbuf, '\0', sizeof(uart_rxbuf));
+		uart_rx_leng = 0;
+		break;
+				case UART_STRING_INCOMPLETE:
+						break;
+		}
+	}
+	else if( uart_rx_leng > 100 ) // assume packets shorter than this are garbage or incomplete
     {
         uint8_t ret_val = check_uart_str();
         
@@ -897,11 +935,11 @@ extern void blink_led_entry_point()
 
 static void sendCloudMsg(void)
 {
-    int err_dp = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE, data_uart, strlen(data_uart));
+    int err = data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE, data_uart, strlen(data_uart));
 	
-    if (err_dp )
+    if (err )
     {
-        LOG_INF("Publish error: %d", err_dp);
+        LOG_INF("Publish error: %d", err);
     }
 }
 
@@ -931,8 +969,9 @@ void timer_handler_msg_send(struct k_timer *timer_id)
 
 void main(void)
 {
-	int err, err_dp;
-	uint32_t connect_attempt = 0;
+	int err;
+	uint8_t lte_connect_attempt = 0;
+	uint32_t mqtt_connect_attempt = 0;
 
 	LOG_INF("The MQTT simple sample started");
 
@@ -967,7 +1006,12 @@ void main(void)
         #endif 
     }
 
-	k_sleep(K_SECONDS(5));
+	k_sleep(K_SECONDS(15));
+
+	while(!nRF52840_started){
+			printk("Waiting for nRF52840\n");
+			k_sleep(K_SECONDS(1));
+	}
 
 
 #if defined(CONFIG_MQTT_LIB_TLS)
@@ -996,8 +1040,15 @@ void main(void)
 	
 		err = modem_configure();
 		if (err) {
-			LOG_INF("Retrying in %d seconds",
-				CONFIG_LTE_CONNECT_RETRY_DELAY_S);
+			LOG_INF("Retrying in %d seconds. Attempt %d failed.",
+				CONFIG_LTE_CONNECT_RETRY_DELAY_S, lte_connect_attempt+1);
+			
+			if (lte_connect_attempt++ >= 4)
+			{
+#if !defined(CONFIG_DEBUG) && defined(CONFIG_REBOOT)
+				sys_reboot(0);
+#endif
+			}
 			k_sleep(K_SECONDS(CONFIG_LTE_CONNECT_RETRY_DELAY_S));
 		}
 	} while (err);
@@ -1020,7 +1071,7 @@ void main(void)
 #endif
 
 do_connect:
-	if (connect_attempt++ > 0) {
+	if (mqtt_connect_attempt++ > 0) {
 		LOG_INF("Reconnecting in %d seconds...",
 			CONFIG_MQTT_RECONNECT_DELAY_S);
 		k_sleep(K_SECONDS(CONFIG_MQTT_RECONNECT_DELAY_S));
@@ -1037,6 +1088,7 @@ do_connect:
 		return;
 	}
     
+	/* Packet Sending */
     k_work_init(&work_msg_send, work_handler_msg_send);   // Initialize the work items that will be submitted
     k_work_queue_start( &queue_work_msg_send, my_wq_stack_area,        
                     K_THREAD_STACK_SIZEOF(my_wq_stack_area), MY_WQ_PRIORITY, NULL); // Initialize & start the work queue that they are submitted to
