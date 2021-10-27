@@ -6,7 +6,7 @@
   rx-pin = <28>;
   rts-pin = <27>;
   cts-pin = <26>;
-  hw-flow-control;
+  hw-flow-control; // disable if debugging on the 9160 DK
 };
 
 &pwm1 {
