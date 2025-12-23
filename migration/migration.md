@@ -1,4 +1,4 @@
-# Header Files Migration
+# 1.Header Files Migration
 many header files need to have the prefix /zephyr
 1. `#include <zephyr.h>` → `#include <zephyr/kernel.h>`
    - https://github.com/nrfconnect/sdk-nrf/blob/main/samples/net/azure_iot_hub/src/main.c
@@ -33,7 +33,7 @@ many header files need to have the prefix /zephyr
 8. `#include <drivers/gpio.h>` → `#include <zephyr/drivers/gpio.h>`
    - https://docs.nordicsemi.com/bundle/zephyr-apis-3.1.1/page/drivers_2gpio_8h.html
 
-# Device Tree and GPIO Initialization
+# 2.Device Tree and GPIO Initialization
 
 ## Reference
 - GPIO Interface: https://docs.zephyrproject.org/latest/doxygen/html/group__gpio__interface.html
@@ -142,7 +142,7 @@ many header files need to have the prefix /zephyr
     }
      ```
 
-# modem_configure() Function Update to Asynchronous Connection (Line 633)
+# 3.modem_configure() Function Update to Asynchronous Connection (Line 633)
 1. **Disable PSM and eDRX (Line 642, 643)**
      - New Code
      ```c
@@ -254,4 +254,270 @@ many header files need to have the prefix /zephyr
     LOG_INF("Waiting for network connection");
     k_sem_take(&network_connected_sem, K_FOREVER);
     LOG_INF("Connected to network");
+    ```
+
+# 4.client_init() Function Update
+1. **MQTT version update (Line 553)**
+    - The newest mqtt version is mqtt5.0, the old code uses mqtt3.1.1
+    - New Code
+    ```c
+    client->protocol_version = MQTT_VERSION_5_0;
+    ```
+2. Azure IoT Hub Configuration
+    - Reference: https://docs.nordicsemi.com/bundle/ncs-2.9.1/page/nrf/libraries/networking/azure_iot_hub.html
+    - Old Code
+    ```c
+    static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=AquaHub2.azure-devices.net%2Fdevices%2Faqsdevice27&sig=9tycPD9ocM%2BVb5B%2F18jzVQ8%2B3%2FIO0Dy185P6A46UBSk%3D&se=2500389785";
+    static const char* CONFIG_MQTT_BROKER_USERNAME = "AquaHub2.azure-devices.net/aqsdevice27/?api-version=2018-06-30";
+    ```
+    - New Code
+    ```c
+    #include <net/azure_iot_hub.h>
+    struct azure_iot_hub_config cfg = {
+        .device_id = {
+            .ptr = device_id,
+            .size = strlen(device_id),
+        },
+        .hostname = {
+            .ptr = "AquaHub2.azure-devices.net",
+            .size = strlen("AquaHub2.azure-devices.net"),
+        },
+        .use_dps = true,
+    };
+
+    err = azure_iot_hub_connect(&cfg);
+    if (err < 0) {
+		LOG_ERR("azure_iot_hub_connect failed: %d", err);
+		return 0;
+	}
+    ```
+
+## 5. MQTT connection and reconnection Improvements
+1. **MQTT reconnection attempts**
+    - Old Code (Line 1064 - 1083) uses blocking reconnection
+    - It should be changed to an event-driven reconnection mechanism
+    - New Code:
+    ```c
+    enum mqtt_state {
+        MQTT_STATE_DISCONNECTED,
+        MQTT_STATE_CONNECTING,
+        MQTT_STATE_CONNECTED,
+        MQTT_STATE_ERROR
+    };
+
+    static enum mqtt_state mqtt_state = MQTT_STATE_DISCONNECTED;
+    static uint8_t mqtt_connect_attempt = 0;
+    static struct k_work_delayable mqtt_connect_work;
+
+    static void mqtt_connect_work_fn(struct k_work *work)
+    {
+        int err;
+        
+        if (mqtt_state == MQTT_STATE_CONNECTED) {
+            return;
+        }
+        
+        mqtt_state = MQTT_STATE_CONNECTING;
+        LOG_INF("MQTT connection attempt %d", mqtt_connect_attempt + 1);
+        
+        err = mqtt_connect(&client);
+        if (err == 0) {
+            LOG_INF("MQTT connect initiated successfully");
+            mqtt_connect_attempt = 0;
+        } else {
+            LOG_ERR("mqtt_connect failed: %d", err);
+            mqtt_state = MQTT_STATE_DISCONNECTED;
+            
+            mqtt_connect_attempt++;
+
+            uint32_t backoff_sec = MIN(30, (1 << mqtt_connect_attempt));
+            
+            if (mqtt_connect_attempt >= 10) {
+                LOG_ERR("Too many MQTT connection failures, rebooting...");
+                #if defined(CONFIG_REBOOT)
+                sys_reboot(SYS_REBOOT_COLD);
+                #endif
+                return;
+            }
+            
+            LOG_INF("Retrying in %d seconds...", backoff_sec);
+            k_work_schedule(&mqtt_connect_work, K_SECONDS(backoff_sec));
+        }
+    }
+
+    static void mqtt_connect_init(void)
+    {
+        k_work_init_delayable(&mqtt_connect_work, mqtt_connect_work_fn);
+    }
+
+    static void mqtt_connect_start(void)
+    {
+        mqtt_connect_attempt = 0;
+        k_work_schedule(&mqtt_connect_work, K_NO_WAIT);
+    }
+    ```
+2. **MQTT event handler function (Line 328)**
+    - No reconnection mechanism when CONNACK failed or CONNACK
+    - New Code: 
+    ```c
+    case MQTT_EVT_CONNACK:
+        if (evt->result != 0) {
+            LOG_ERR("MQTT connect failed: %d", evt->result);
+            mqtt_state = MQTT_STATE_ERROR;
+            
+            switch (evt->result) {
+            case MQTT_CONNECTION_ACCEPTED:
+                break;
+            case MQTT_NOT_AUTHORIZED:
+                LOG_ERR("Authentication failed - check credentials");
+                break;
+            case MQTT_UNACCEPTABLE_PROTOCOL_VERSION:
+                LOG_ERR("Protocol version not supported");
+                break;
+            case MQTT_IDENTIFIER_REJECTED:
+                LOG_ERR("Client ID rejected");
+                break;
+            case MQTT_SERVER_UNAVAILABLE:
+                LOG_ERR("Server unavailable");
+                break;
+            case MQTT_BAD_USER_NAME_OR_PASSWORD:
+                LOG_ERR("Bad username or password");
+                break;
+            case MQTT_NOT_AUTHORIZED_5:
+                LOG_ERR("Not authorized (MQTT 5.0)");
+                break;
+            default:
+                LOG_ERR("Unknown connection error: %d", evt->result);
+                break;
+            }
+            
+            k_work_schedule(&mqtt_connect_work, K_SECONDS(5));
+            break;
+        }
+
+        LOG_INF("MQTT client connected");
+        mqtt_state = MQTT_STATE_CONNECTED;
+        mqtt_connect_attempt = 0;
+        
+        #ifdef BLG840_M1
+        mqtt_connecting = false;
+        #endif
+
+        err = subscribe();
+        if (err) {
+            LOG_ERR("Failed to subscribe: %d", err);
+        }
+        break;
+
+    case MQTT_EVT_DISCONNECT:
+        LOG_INF("MQTT client disconnected: %d", evt->result);
+        mqtt_state = MQTT_STATE_DISCONNECTED;
+        
+        #ifdef BLG840_M1
+        mqtt_connecting = true;
+        #endif
+        
+        LOG_INF("Scheduling reconnection...");
+        k_work_schedule(&mqtt_connect_work, K_SECONDS(CONFIG_MQTT_RECONNECT_DELAY_S));
+        break;
+    ```
+
+3. **Main loop Line (From Line 1102)**
+    - Any error will break out of the loop and restart directly
+    - There are recovery errors and fatal errors and restart is not required in the first case.
+    - New Code
+    ```c
+	while (1) {
+        // check status
+		if (mqtt_state != MQTT_STATE_CONNECTED) {
+			k_sleep(K_SECONDS(1));
+			continue;
+		}
+
+		int32_t timeout = mqtt_keepalive_time_left(&client);
+		if (timeout < 0) {
+			timeout = 0;
+		}
+
+		err = poll(&fds, 1, timeout);
+		if (err < 0) {
+			LOG_ERR("poll error: %d (errno: %d)", err, errno);
+			
+			/* Error types */
+			if (errno == EINTR) {
+				/* Interrupted by the signal, continue */
+				continue;
+			} else if (errno == EBADF || errno == EINVAL) {
+				/* The file descriptor is invalid, reconnect */
+				LOG_ERR("Invalid file descriptor, reconnecting...");
+				mqtt_disconnect(&client);
+				mqtt_state = MQTT_STATE_DISCONNECTED;
+				k_work_schedule(&mqtt_connect_work, K_SECONDS(1));
+				continue;
+			} else {
+				/* Other errors */
+				k_sleep(K_MSEC(100));
+				continue;
+			}
+		}
+
+		/* keep mqtt connection */
+		err = mqtt_live(&client);
+		if (err != 0 && err != -EAGAIN) {
+			LOG_ERR("mqtt_live error: %d", err);
+
+			if (err == -ENOTCONN) {
+				LOG_INF("Connection lost, reconnecting...");
+				mqtt_state = MQTT_STATE_DISCONNECTED;
+				k_work_schedule(&mqtt_connect_work, K_SECONDS(1));
+				continue;
+			}
+
+			k_sleep(K_MSEC(100));
+			continue;
+		}
+
+		if ((fds.revents & POLLIN) == POLLIN) {
+			err = mqtt_input(&client);
+			if (err != 0) {
+				LOG_ERR("mqtt_input error: %d", err);
+				
+				if (err == -ENOTCONN || err == -ECONNRESET) {
+					LOG_INF("Connection error, reconnecting...");
+					mqtt_disconnect(&client);
+					mqtt_state = MQTT_STATE_DISCONNECTED;
+					k_work_schedule(&mqtt_connect_work, K_SECONDS(1));
+					continue;
+				}
+			}
+		}
+
+		if ((fds.revents & POLLERR) == POLLERR) {
+			LOG_ERR("POLLERR detected");
+			mqtt_disconnect(&client);
+			mqtt_state = MQTT_STATE_DISCONNECTED;
+			k_work_schedule(&mqtt_connect_work, K_SECONDS(2));
+			continue;
+		}
+
+		if ((fds.revents & POLLNVAL) == POLLNVAL) {
+			LOG_ERR("POLLNVAL detected - invalid socket");
+			mqtt_disconnect(&client);
+			mqtt_state = MQTT_STATE_DISCONNECTED;
+			k_work_schedule(&mqtt_connect_work, K_SECONDS(2));
+			continue;
+		}
+
+		if ((fds.revents & POLLHUP) == POLLHUP) {
+			LOG_ERR("POLLHUP detected - connection hung up");
+			mqtt_disconnect(&client);
+			mqtt_state = MQTT_STATE_DISCONNECTED;
+			k_work_schedule(&mqtt_connect_work, K_SECONDS(2));
+			continue;
+		}
+	}
+	
+	#if defined(CONFIG_REBOOT)
+	sys_reboot(SYS_REBOOT_COLD);
+	#endif
     ```
