@@ -640,7 +640,7 @@ static int modem_configure(void)
 	 */
 	LOG_INF("Disabling PSM and eDRX");
 	lte_lc_psm_req(false);
-	lte_lc_edrx_req(false);
+	at_cmd_init()_edrx_req(false);
 
 	if (IS_ENABLED(CONFIG_LTE_AUTO_INIT_AND_CONNECT)) {
 		/* Do nothing, modem is already turned on

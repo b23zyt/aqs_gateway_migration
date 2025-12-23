@@ -118,28 +118,140 @@ many header files need to have the prefix /zephyr
 6. **blink_led_entry_point function update**
      - The new code is based on the new APIs above
      ```c
-    extern void blink_led_entry_point(void)  // 添加void参数
+    extern void blink_led_entry_point(void)
     {
         bool led_state = false;
 
         while( lte_connecting )
         {
-            gpio_pin_set_dt(&blu_led, (int)led_state);  // 使用新API
+            gpio_pin_set_dt(&blu_led, (int)led_state);  // new API
             led_state = !led_state;
             k_sleep(K_SECONDS(1));
         }
 
         while( mqtt_connecting )
         {
-            gpio_pin_set_dt(&blu_led, (int)led_state);  // 使用新API
+            gpio_pin_set_dt(&blu_led, (int)led_state);  // new API
             led_state = !led_state;
-            k_sleep(K_MSEC(500));  // K_SECONDS(0.5)改为K_MSEC(500)更清晰
+            k_sleep(K_MSEC(500)); 
         }
 
         // leave in solid ON state
-        gpio_pin_set_dt(&blu_led, 0);  // 使用新API
+        gpio_pin_set_dt(&blu_led, 0);  // newAPI
         return;
     }
      ```
 
-# LTE and Modem
+# modem_configure() Function Update to Asynchronous Connection (Line 633)
+1. **Disable PSM and eDRX (Line 642, 643)**
+     - New Code
+     ```c
+    int err = lte_lc_psm_param_set(NULL);
+    err = lte_lc_edrx_param_set(LTE_LC_LTE_MODE_NONE, NULL)
+     ```
+    
+2. **LTE Connection (Line 660 - 672)**
+     - Reference: https://github.com/nrfconnect/sdk-nrf/blob/main/samples/net/azure_iot_hub/src/main.c (Line 578)
+     - New Code
+    ```c
+    LOG_INF("Bringing network interface up and connecting to the network");
+
+    err = conn_mgr_all_if_up(true);
+    if (err) {
+        LOG_ERR("conn_mgr_all_if_up failed: %d", err);
+        return err;
+    }
+
+    err = conn_mgr_all_if_connect(true);
+    if (err) {
+        LOG_ERR("conn_mgr_all_if_connect failed: %d", err);
+        return err;
+    }
+    ```
+3. **New AT Commands**
+    - at_cmd_write( ) → nrf_modem_at_cmd( ) (mentioned in Part1)
+    - Remove at_cmd_init( ) (Line 497)
+
+4. **Overall Workflow**
+    - Old workflow: modem_configure() → lte_lc_init_and_connect() → if (err == -EALREADY) lte_lc_connect() → Block until successful connected
+    - New workflow: conn_mgr_all_if_up(true) → conn_mgr_all_if_connect(true) → k_sem_take(&network_connected_sem, K_FOREVER)
+
+5. **Summary**
+     - New modem_configure function
+    ```c
+    static int modem_configure(void)
+    {
+    #if defined(CONFIG_LTE_LINK_CONTROL)
+        int err;
+
+        LOG_INF("Configuring LTE link");
+
+        /* Disable power saving features for responsive demo */
+        err = lte_lc_psm_param_set(NULL);
+        if (err && err != -EOPNOTSUPP) {
+            LOG_WRN("Failed to disable PSM: %d", err);
+        }
+
+        err = lte_lc_edrx_param_set(LTE_LC_LTE_MODE_NONE, NULL);
+        if (err && err != -EOPNOTSUPP) {
+            LOG_WRN("Failed to disable eDRX: %d", err);
+        }
+
+        /* Use Connection Manager for network management */
+        LOG_INF("Bringing network interface up");
+        err = conn_mgr_all_if_up(true);
+        if (err) {
+            LOG_ERR("conn_mgr_all_if_up failed: %d", err);
+            return err;
+        }
+
+        LOG_INF("Connecting to network");
+        err = conn_mgr_all_if_connect(true);
+        if (err) {
+            LOG_ERR("conn_mgr_all_if_connect failed: %d", err);
+            return err;
+        }
+
+        LOG_INF("Network configuration complete");
+    #endif /* defined(CONFIG_LTE_LINK_CONTROL) */
+
+        return 0;
+    }
+    ```
+    - Add callback function (refer to the Azure example)
+    ```c
+    static K_SEM_DEFINE(network_connected_sem, 0, 1);
+
+    static void l4_event_handler(struct net_mgmt_event_callback *cb,
+                                uint64_t event,
+                                struct net_if *iface)
+    {
+        switch (event) {
+        case NET_EVENT_L4_CONNECTED:
+            LOG_INF("Network connectivity established");
+            k_sem_give(&network_connected_sem);
+            break;
+        case NET_EVENT_L4_DISCONNECTED:
+            LOG_INF("Network connectivity lost");
+            break;
+        default:
+            return;
+        }
+    }
+
+    static struct net_mgmt_event_callback l4_cb;
+    net_mgmt_init_event_callback(&l4_cb, l4_event_handler,
+                                NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED);
+    net_mgmt_add_event_callback(&l4_cb);
+
+    err = modem_configure();
+    if (err) {
+        LOG_ERR("Modem configuration failed: %d", err);
+        return;
+    }
+
+    //wait for connection
+    LOG_INF("Waiting for network connection");
+    k_sem_take(&network_connected_sem, K_FOREVER);
+    LOG_INF("Connected to network");
+    ```
