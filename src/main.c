@@ -29,10 +29,9 @@
 #include <dk_buttons_and_leds.h>
 
 #include "certificates.h"
-
 //IotHub Device Connection Parameters
-static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=Aquahub.azure-devices.net%2Fdevices%2Fdemodevice&sig=hN0X4frfUS4fmqcTRizfL8aZUO6FVSYmg%2Bs%2BVM5GVxI%3D&se=1646332644";
-static const char* CONFIG_MQTT_BROKER_USERNAME = "Aquahub.azure-devices.net/demodevice/?api-version=2018-06-30";
+static const char* CONFIG_MQTT_BROKER_PASSWORD = "SharedAccessSignature sr=AquaHub2.azure-devices.net%2Fdevices%2Faqsdevice27&sig=9tycPD9ocM%2BVb5B%2F18jzVQ8%2B3%2FIO0Dy185P6A46UBSk%3D&se=2500389785";
+static const char* CONFIG_MQTT_BROKER_USERNAME = "AquaHub2.azure-devices.net/aqsdevice27/?api-version=2018-06-30";
 
 // Fanstel Gateway Version
 #define BLG840_M2 // new gateway
@@ -951,126 +950,144 @@ void timer_handler_msg_send(struct k_timer *timer_id)
 }
 #endif
 
+
+/**
+ * @brief Main function for the MQTT simple sample application.
+ *
+ * This function initializes the necessary components (UART, LEDs, MQTT client, etc.),
+ * configures the modem for LTE connectivity, establishes MQTT connection, and handles
+ * communication with the MQTT broker.
+ * 
+ * It starts by initializing various components, including LEDs, UART, and MQTT client. 
+ * It then configures the modem for LTE connectivity, establishes an MQTT connection, and handles communication with the MQTT broker.
+ */
 void main(void)
 {
-	int err;
-	uint8_t lte_connect_attempt = 0;
-	uint32_t mqtt_connect_attempt = 0;
+    int err;
+    uint8_t lte_connect_attempt = 0; // Counter for LTE connection attempts
+    uint32_t mqtt_connect_attempt = 0; // Counter for MQTT connection attempts
 
-	LOG_INF("The MQTT simple sample started");
+    LOG_INF("The MQTT simple sample started"); // Log startup message
 
-#ifdef BLG840_M1
+    #ifdef BLG840_M1
+        // Initialize and configure LEDs
+        led_dev = device_get_binding(RED_LED); // Get LED device binding
+        if (led_dev == NULL) {
+            return;
+        }
 
-	led_dev = device_get_binding(RED_LED);
-	if (led_dev == NULL) {
-		return;
-	}
+        err = gpio_pin_configure(led_dev, RED_LED_PIN, GPIO_OUTPUT_INACTIVE | RED_LED_FLAGS); // Configure RED LED
+        if (err < 0) {
+            return;
+        }
 
-    err = gpio_pin_configure(led_dev, RED_LED_PIN, GPIO_OUTPUT_INACTIVE | RED_LED_FLAGS); //p0.02 == LED RED, logic reversed?
-	if (err < 0) {
-		return;
-	}
-    err = gpio_pin_configure(led_dev, BLU_LED_PIN, GPIO_OUTPUT_ACTIVE | BLU_LED_FLAGS); //p0.03 == LED BLUE, logic reversed?
-	if (err < 0) {
-		return;
-	}
+        err = gpio_pin_configure(led_dev, BLU_LED_PIN, GPIO_OUTPUT_ACTIVE | BLU_LED_FLAGS); // Configure BLUE LED
+        if (err < 0) {
+            return;
+        }
+    #endif
 
-#endif
-
-	err = init_uart();
-    if (!err)
-    {
-        //printk("UART enabled\n");
-    }
-    else
-    {
-        printk("UART enable error\n");
+    // Initialize UART
+    err = init_uart(); // Initialize UART communication
+    if (!err) {
+        // UART enabled
+    } else {
+        printk("UART enable error\n"); // Print error message for UART initialization failure
         #if !defined(CONFIG_DEBUG) && defined(CONFIG_REBOOT)
-            sys_reboot(0);
-        #endif 
+            sys_reboot(0); // Reboot the system if not in debug mode
+        #endif
     }
 
-	k_sleep(K_SECONDS(15));
+    k_sleep(K_SECONDS(15)); // Delay for 15 seconds
 
-	while(!nRF52840_started){
-			printk("Waiting for nRF52840\n");
-			k_sleep(K_SECONDS(1));
-	}
+    while (!nRF52840_started) {
+        printk("Waiting for nRF52840\n"); // Print message while waiting for nRF52840 to start
+        k_sleep(K_SECONDS(1)); // Delay for 1 second
+    }
 
+    // Provision certificates if TLS is enabled
+    #if defined(CONFIG_MQTT_LIB_TLS)
+        err = certificates_provision(); // Provision TLS certificates
+        if (err != 0) {
+            return;
+        }
+    #endif
 
-#if defined(CONFIG_MQTT_LIB_TLS)
-	err = certificates_provision();
-	if (err != 0) {
-		// LOG_ERR("Failed to provision certificates");
-		return;
-	}
-#endif /* defined(CONFIG_MQTT_LIB_TLS) */
+    #ifdef BLG840_M1
+        // Start a thread to blink the LED while LTE is connecting
+        lte_connecting = true;
+        k_tid_t my_tid = k_thread_create(&my_thread_data, my_th_stack_area,
+                                        K_THREAD_STACK_SIZEOF(my_th_stack_area),
+                                        blink_led_entry_point,
+                                        NULL, NULL, NULL,
+                                        MY_TH_PRIORITY, 0, K_NO_WAIT);
+        gpio_pin_set(led_dev, RED_LED_PIN, 1); // Turn off RED LED
+    #endif
 
-#ifdef BLG840_M1
-	// to blink LED
-	lte_connecting = true;
-	k_tid_t my_tid = k_thread_create(&my_thread_data, my_th_stack_area,
-								K_THREAD_STACK_SIZEOF(my_th_stack_area),
-								blink_led_entry_point,
-								NULL, NULL, NULL,
-								MY_TH_PRIORITY, 0, K_NO_WAIT);
-	//Turn off RED LED
-	gpio_pin_set(led_dev, RED_LED_PIN, 1);
-#endif
+    do {
+        // For nRF52840
+        LOG_INF("STATE_LTE_CONNECTING");
 
-	do {
-		// For nRF52840
-		LOG_INF("STATE_LTE_CONNECTING");
-	
-		err = modem_configure();
-		if (err) {
-			LOG_INF("Retrying in %d seconds. Attempt %d failed.",
-				CONFIG_LTE_CONNECT_RETRY_DELAY_S, lte_connect_attempt+1);
-			
-			if (lte_connect_attempt++ >= 4)
-			{
-#if !defined(CONFIG_DEBUG) && defined(CONFIG_REBOOT)
-				sys_reboot(0);
-#endif
-			}
-			k_sleep(K_SECONDS(CONFIG_LTE_CONNECT_RETRY_DELAY_S));
-		}
-	} while (err);
+        err = modem_configure(); // Configure the modem for LTE connectivity
+        if (err) {
+            LOG_INF("Retrying in %d seconds. Attempt %d failed.",
+                CONFIG_LTE_CONNECT_RETRY_DELAY_S, lte_connect_attempt + 1);
 
-#ifdef BLG840_M1
-	mqtt_connecting = true;
-	lte_connecting = false;
-#endif
+            if (lte_connect_attempt++ >= 4) {
+                #if !defined(CONFIG_DEBUG) && defined(CONFIG_REBOOT)
+                    sys_reboot(0); // Reboot the system if LTE connection attempts fail
+                #endif
+            }
+            k_sleep(K_SECONDS(CONFIG_LTE_CONNECT_RETRY_DELAY_S)); // Delay before retrying
+        }
+    } while (err);
 
-	// For nRF52840
-	LOG_INF("STATE_MQTT_CONNECTING");
-	err = client_init(&client);
-	if (err != 0) {
-		LOG_ERR("client_init: %d", err);
-		return;
-	}
+    #ifdef BLG840_M1
+        // LED blink thread for LTE connection ends
+        mqtt_connecting = true;
+        lte_connecting = false;
+    #endif
 
-#if defined(CONFIG_DK_LIBRARY)
-	dk_buttons_init(button_handler);
-#endif
+    // For nRF52840
+    LOG_INF("STATE_MQTT_CONNECTING");
+    err = client_init(&client); // Initialize MQTT client
+    if (err != 0) {
+        LOG_ERR("client_init: %d", err);
+        return;
+    }
 
-do_connect:
-	if (mqtt_connect_attempt++ > 0) {
-		LOG_INF("Reconnecting in %d seconds...",
-			CONFIG_MQTT_RECONNECT_DELAY_S);
-		k_sleep(K_SECONDS(CONFIG_MQTT_RECONNECT_DELAY_S));
-	}
-	err = mqtt_connect(&client);
-	if (err != 0) {
-		LOG_ERR("mqtt_connect %d", err);
-		goto do_connect;
-	}
+    // Initialize buttons if CONFIG_DK_LIBRARY is defined
+    #if defined(CONFIG_DK_LIBRARY)
+        dk_buttons_init(button_handler); // Initialize buttons
+    #endif
 
-	err = fds_init(&client);
-	if (err != 0) {
-		LOG_ERR("fds_init: %d", err);
-		return;
-	}
+  int max_attempts = 100;  // maximum number of connection attempts
+
+while (mqtt_connect_attempt < max_attempts) {
+        err = mqtt_connect(&client);
+
+        if (err == 0) {
+            break; // successfully connected, break out of while loop
+        }
+
+        LOG_ERR("mqtt_connect failed: %d", err);
+        LOG_INF("Reconnecting in %d seconds...", CONFIG_MQTT_RECONNECT_DELAY_S);
+        k_sleep(K_SECONDS(CONFIG_MQTT_RECONNECT_DELAY_S));
+
+        mqtt_connect_attempt++;
+    }
+
+	if (mqtt_connect_attempt >= max_attempts) {
+        LOG_ERR("Maximum number of MQTT connection attempts reached.");
+        return;  // Exit if the maximum number of connection attempts is reached
+    }
+
+	    // Initialize file descriptors or other resources
+    err = fds_init(&client);
+    if (err != 0) {
+        LOG_ERR("fds_init: %d", err);
+        return;
+    }
     
 	/* Packet Sending */
     k_work_init(&work_msg_send, work_handler_msg_send);   // Initialize the work items that will be submitted
