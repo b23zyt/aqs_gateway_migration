@@ -425,7 +425,7 @@ many header files need to have the prefix /zephyr
 3. **Main loop Line (From Line 1102)**
     - Any error will break out of the loop and restart directly
     - There are recovery errors and fatal errors and restart is not required in the first case.
-    - New Code
+    - New Code: doesn't exit for all types of error
     ```c
 	while (1) {
         // check status
@@ -521,3 +521,53 @@ many header files need to have the prefix /zephyr
 	sys_reboot(SYS_REBOOT_COLD);
 	#endif
     ```
+
+## 6. UART Improvements
+1. **UART initialization**
+     - Old Code (line 879 - 891)
+    ```c
+    static int init_uart(void)
+    {
+        dev_uart = device_get_binding("UART_0");
+        if (!dev_uart)
+        {
+            return -ENXIO;
+        }
+
+        uart_irq_callback_set(dev_uart, uart_cb);
+        uart_irq_rx_enable(dev_uart);
+
+        return 0;
+    }
+    ```
+    - Should change to use device tree:
+    - Reference: http://docs.zephyrproject.org/latest/build/dts/howtos.html 
+    - New Code:
+    ```c
+    #define UART_NODE DT_CHOSEN(zephyr_console)
+
+    static int init_uart(void)
+    {
+        int err;
+        
+        dev_uart = DEVICE_DT_GET(UART_NODE);
+        if (!device_is_ready(dev_uart)) {
+            LOG_ERR("UART device not ready");
+            return -ENODEV;
+        }
+        
+        LOG_INF("UART device: %s", dev_uart->name);
+        
+        err = uart_irq_callback_user_data_set(dev_uart, uart_cb, NULL);
+        if (err) {
+            LOG_ERR("Failed to set UART callback: %d", err);
+            return err;
+        }
+        
+        uart_irq_rx_enable(dev_uart);
+        
+        LOG_INF("UART initialized successfully");
+        
+        return 0;
+    }
+
