@@ -1,5 +1,7 @@
 # 1.Header Files Migration
-many header files need to have the prefix /zephyr
+Many header files need to have the prefix /zephy
+Here are some examples
+
 1. `#include <zephyr.h>` → `#include <zephyr/kernel.h>`
    - https://github.com/nrfconnect/sdk-nrf/blob/main/samples/net/azure_iot_hub/src/main.c
 
@@ -570,4 +572,102 @@ many header files need to have the prefix /zephyr
         
         return 0;
     }
+    ```
+## 7. Work Queue
+1. **Work queue initialization (Line 1093 - 1095)**
+    - Based on the Azure iot hub github repository, it should update to 
+    ```c
+    static int init_msg_send_workqueue(void)
+    {
+        k_work_init(&work_msg_send, work_handler_msg_send);
+        k_work_init_delayable(&work_msg_send_delayed, work_handler_msg_send_delayed);
 
+        k_work_queue_start(&queue_work_msg_send,
+                        msg_send_wq_stack,
+                        K_THREAD_STACK_SIZEOF(msg_send_wq_stack),
+                        MSG_SEND_WQ_PRIORITY,
+                        NULL);
+        
+        k_thread_name_set(&queue_work_msg_send.thread, "msg_send_wq");
+        
+        LOG_INF("Message send workqueue initialized");
+        return 0;
+    }
+
+    /* call it inside main */
+    err = init_msg_send_workqueue();
+    if (err) {
+        LOG_ERR("Failed to init workqueue: %d", err);
+        return err;
+    }
+    ```
+## 8. prj.conf
+1. **New prj.conf** 
+    - Add a section for network connection manager
+    - Remove the AT Host section
+    - Add a section for UART
+    - Update Azure IoT Hub Configuration using CONFIG_AZURE_IOT_HUB_DEVICE_ID and CONFIG_AZURE_IOT_HUB_HOSTNAME
+    - New file
+    ```
+    # Networking
+    CONFIG_NETWORKING=y
+    CONFIG_NET_NATIVE=n
+    CONFIG_NET_SOCKETS_OFFLOAD=y
+    CONFIG_NET_SOCKETS=y
+    CONFIG_NET_SOCKETS_POSIX_NAMES=y
+
+    # New
+    CONFIG_NET_CONNECTION_MANAGER=y
+    CONFIG_NET_MGMT=y
+    CONFIG_NET_MGMT_EVENT=y
+    CONFIG_NET_MGMT_EVENT_INFO=y
+
+    # LTE link control
+    CONFIG_LTE_NETWORK_USE_FALLBACK=n
+    CONFIG_LTE_LINK_CONTROL=y
+    CONFIG_LTE_AUTO_INIT_AND_CONNECT=n
+    CONFIG_LTE_NETWORK_MODE_LTE_M=y # new
+
+    # CONFIG_LTE_LOCK_BANDS=y
+    # CONFIG_LTE_LOCK_BAND_MASK="00010001100001001000"
+
+    # Modem library
+    CONFIG_NRF_MODEM_LIB=y
+
+    # UART
+    CONFIG_UART_INTERRUPT_DRIVEN=y
+    CONFIG_SERIAL=y
+
+    # MQTT
+    CONFIG_MQTT_LIB=y
+    CONFIG_MQTT_LIB_TLS=y
+    CONFIG_MQTT_CLEAN_SESSION=y
+    CONFIG_MQTT_KEEPALIVE=900
+    CONFIG_MQTT_MESSAGE_BUFFER_SIZE=1024
+    CONFIG_MQTT_PAYLOAD_BUFFER_SIZE=1024
+
+    # Azure IoT Hub
+    CONFIG_AZURE_IOT_HUB=y
+    CONFIG_AZURE_IOT_HUB_DEVICE_ID="aqsdevice27"
+    CONFIG_AZURE_IOT_HUB_HOSTNAME="AquaHub2.azure-devices.net"
+    CONFIG_AZURE_IOT_HUB_DPS=n
+
+    # Key
+    CONFIG_MODEM_KEY_MGMT=y
+
+    # Application - Misc
+    CONFIG_REBOOT=y
+    CONFIG_SERIAL=y
+    CONFIG_GPIO=y
+
+    # Enable Logging
+    CONFIG_LOG=y
+    CONFIG_MQTT_SIMPLE_LOG_LEVEL_DBG=y
+
+    # Memory
+    CONFIG_MAIN_STACK_SIZE=8192
+    CONFIG_HEAP_MEM_POOL_SIZE=4096
+
+    # NewLib C
+    CONFIG_NEWLIB_LIBC=y
+    ```
