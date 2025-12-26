@@ -1,0 +1,9 @@
+{
+    "C_Cpp.dimInactiveRegions": false,
+    "files.associations": {
+        "modem_key_mgmt.h": "c"
+    },
+    "nrf-connect.applications": [
+        "${workspaceFolder}"
+    ]
+}
